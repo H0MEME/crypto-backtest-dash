@@ -42,7 +42,6 @@ strategy_info = {
     }
 }
 
-# --- ดึงข้อมูลจาก Binance.US ---
 @st.cache_data(ttl=86400)
 def get_crypto_usdt_pairs():
     exchange = ccxt.binanceus({'enableRateLimit': True}) 
@@ -140,7 +139,7 @@ def load_historical_data(sym, tf, days):
 df = load_historical_data(symbol, timeframe, days_back)
 
 if df.empty:
-    st.error("ไม่พบข้อมูล กรุณาลองเปลี่ยนเหรียญหรือลดเวลาลง")
+    st.error("ไม่พบข้อมูลสำหรับเหรียญนี้ในระยะเวลาที่เลือก กรุณาเปลี่ยนเหรียญหรือลดระยะเวลาย้อนหลัง")
     st.stop()
 
 # คำนวณ Indicator 
@@ -413,6 +412,8 @@ fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0), xaxis_title="จ�
 st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("📋 ประวัติการเข้าเทรด")
+
+# --- ป้องกันบั๊กเมื่อไม่มีไม้เทรด ---
 if trades > 0:
     df_history = pd.DataFrame(trade_history)
     df_show = df_history.copy()
@@ -425,7 +426,6 @@ if trades > 0:
     
     st.markdown("💡 **Tip:** คุณสามารถ **คลิกเลือกแถวในตารางด้านล่างนี้** เพื่อเปลี่ยนกราฟวิเคราะห์ไม้เทรดด้านล่างได้ทันทีครับ")
     
-    # --- อัปเดตระบบ Session State บังคับกล่องให้เปลี่ยนตามตาราง ---
     if 'selectbox_idx' not in st.session_state:
         st.session_state.selectbox_idx = 0
     if 'last_clicked_row' not in st.session_state:
@@ -440,17 +440,12 @@ if trades > 0:
     
     if selection_event.selection.rows:
         clicked_row = selection_event.selection.rows[0]
-        # สั่งยัดค่าใส่ Key ของ Selectbox โดยตรง!
         if st.session_state.last_clicked_row != clicked_row:
             st.session_state.selectbox_idx = clicked_row
             st.session_state.last_clicked_row = clicked_row
     else:
         st.session_state.last_clicked_row = None
-else:
-    st.warning("ไม่พบสัญญาณการเข้าเทรด กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
-
-# --- กราฟส่องไม้เทรด (Trade Visualizer) ---
-if trades > 0:
+        
     st.divider()
     st.subheader("🔎 เจาะลึกกราฟแต่ละไม้เทรด (Trade Visualizer)")
     
@@ -466,7 +461,7 @@ if trades > 0:
         "🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ (ตัวเลือกนี้ซิงค์กับตารางด้านบน):", 
         range(trades),
         format_func=lambda i: trade_options[i],
-        key="selectbox_idx" # << ผูกกล่องเข้ากับ Session State ตัวนี้ 100%
+        key="selectbox_idx" 
     )
     
     t_data = trade_history[selected_idx]
@@ -503,3 +498,6 @@ if trades > 0:
     fig2.update_layout(height=500, template='plotly_dark', xaxis_rangeslider_visible=False,
                        title=f"วิเคราะห์ไม้เทรดที่ {selected_idx+1} (สถานะ: {t_data['result']})")
     st.plotly_chart(fig2, use_container_width=True)
+
+else:
+    st.warning("ไม่พบสัญญาณการเข้าเทรด หรือข้อมูลเหรียญในอดีตมีไม่เพียงพอ กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น หรือลองเลือกเหรียญที่มีประวัติยาวนานกว่านี้ (เช่น BTC, ETH)")
