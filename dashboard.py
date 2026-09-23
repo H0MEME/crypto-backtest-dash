@@ -332,7 +332,7 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0), xaxis_title="จำนวนออเดอร์ที่ปิด (Trades)", yaxis_title="ยอดเงินในพอร์ต ($)", template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
 
-   # ----------------------------------------------------
+    # ----------------------------------------------------
     # ส่วนประวัติการเทรดและ Trade Visualizer 
     # ----------------------------------------------------
     st.subheader("📋 ประวัติการเข้าเทรด")
@@ -376,20 +376,16 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
             emoji = "🟢" if t['pnl'] > 0 else ("🔴" if t['pnl'] < 0 else "⚪")
             trade_options.append(f"ไม้ที่ {i+1} : {emoji} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}")
         
-        # ==========================================
-        # 🔥 ท่อนที่แก้ไขใหม่: ดัก Error ค่าแปลกปลอมขั้นเด็ดขาด 🔥
-        # ==========================================
         current_val = st.session_state.get('selectbox_idx', 0)
         try:
             valid_idx = int(current_val)
         except:
-            valid_idx = 0 # ถ้าพังให้กลับไปที่ไม้ที่ 1 (index 0)
+            valid_idx = 0 
             
         if valid_idx >= trades or valid_idx < 0:
             valid_idx = 0
             
         st.session_state.selectbox_idx = valid_idx
-        # ==========================================
             
         selected_idx = st.selectbox(
             "🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ (ตัวเลือกนี้ซิงค์กับตารางด้านบน):", 
@@ -435,12 +431,13 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
 
     else:
         st.warning("ไม่พบสัญญาณการเข้าเทรด หรือข้อมูลเหรียญในอดีตมีไม่เพียงพอ กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
+
 # ==========================================
 # โหมดที่ 2: ALL-MARKET SCREENER
 # ==========================================
 elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Screener)":
     st.title("🚀 All-Market Strategy Screener")
-    st.write("ระบบจะกวาดข้อมูลเหรียญทั้งตลาด เพื่อหาสัญญาณการเข้าเทรด **'ณ เวลานี้'** ตามกลยุทธ์ที่คุณเลือก")
+    st.write("ระบบจะกวาดข้อมูลเหรียญทั้งตลาด เพื่อหาสัญญาณการเข้าเทรด **'ณ เวลานี้'** ตามกลยุทธ์ที่คุณเลือก พร้อมลิงก์เปิดกราฟ TradingView")
     
     screen_mode = st.radio("เลือกรูปแบบการสแกน:", ["1. สแกนหาสัญญาณเข้าเทรดรายกลยุทธ์ (Signal Finder)", "2. สแกนภาพรวมตลาด (Market Overview)"], horizontal=True)
     st.markdown("---")
@@ -563,12 +560,17 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                             signal = None 
 
                     if signal:
+                        # สร้างลิงก์ TradingView แบบตัดเครื่องหมาย / ออก เช่น BTCUSDT
+                        tv_symbol = sym.replace("/", "")
+                        tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCEUS:{tv_symbol}"
+                        
                         results.append({
                             'เหรียญ (Symbol)': sym,
                             'สัญญาณ (Signal)': signal,
                             'ราคา (Price)': f"${latest['close']:.4f}",
                             'RSI (14)': f"{rsi_val:.1f}",
-                            'คำแนะนำ': "เทรดได้เลย (RSI ปลอดภัย)" if use_rsi_filter else ("Overbought ระวัง!" if rsi_val > 70 else ("Oversold ระวัง!" if rsi_val < 30 else "ปกติ"))
+                            'คำแนะนำ': "เทรดได้เลย (RSI ปลอดภัย)" if use_rsi_filter else ("Overbought ระวัง!" if rsi_val > 70 else ("Oversold ระวัง!" if rsi_val < 30 else "ปกติ")),
+                            'ดูกราฟ (Chart)': tv_link
                         })
                         
                 except Exception:
@@ -582,7 +584,15 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
             
             if results:
                 st.success(f"🎉 แจ็คพอต! เจอเหรียญที่มีสัญญาณ {selected_strategy} กำลังเกิด ณ เวลานี้ จำนวน {len(results)} ตัว!")
-                st.dataframe(pd.DataFrame(results), use_container_width=True)
+                
+                # แสดงผลแบบมี LinkColumn เพื่อให้คลิกเปิด TradingView ได้เลย
+                st.dataframe(
+                    pd.DataFrame(results), 
+                    use_container_width=True,
+                    column_config={
+                        "ดูกราฟ (Chart)": st.column_config.LinkColumn("ดูกราฟ (Chart)", display_text="📈 เปิด TradingView")
+                    }
+                )
                 st.info("💡 **นำชื่อเหรียญที่ได้ ไปกรอกในบอทยิงออเดอร์ (Bot.py) ของคุณได้เลยครับ!**")
             else:
                 st.warning(f"😅 ขณะนี้ตลาดนิ่ง ไม่มีเหรียญไหนเกิดสัญญาณ {selected_strategy} เลยครับ (ระบบบอทที่ดีคือการ 'นั่งทับมือ' ในเวลาที่ไม่มีสัญญาณครับ)")
@@ -600,11 +610,15 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                     market_data = []
                     for symbol, data in tickers.items():
                         if symbol.endswith('/USDT') and data.get('quoteVolume') and data.get('percentage'):
+                            tv_symbol = symbol.replace("/", "")
+                            tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCEUS:{tv_symbol}"
+                            
                             market_data.append({
                                 'Symbol': symbol,
                                 'Price': data['last'],
                                 '24h Change (%)': data['percentage'],
                                 '24h Volume': data['quoteVolume'],
+                                'ดูกราฟ (Chart)': tv_link
                             })
                     df_market = pd.DataFrame(market_data)
                     filtered_df = df_market[(df_market['24h Volume'] >= min_vol_usdt) & (df_market['24h Change (%)'] >= price_change_min)].copy()
@@ -616,6 +630,14 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                     styled_df['24h Volume'] = styled_df['24h Volume'].apply(lambda x: f"${x:,.0f}")
                     
                     st.success(f"✅ เจอเหรียญทะลุกรอบกระดานทั้งหมด {len(filtered_df)} ตัว")
-                    st.dataframe(styled_df, use_container_width=True)
+                    
+                    # แสดงผลแบบมี LinkColumn 
+                    st.dataframe(
+                        styled_df, 
+                        use_container_width=True,
+                        column_config={
+                            "ดูกราฟ (Chart)": st.column_config.LinkColumn("ดูกราฟ (Chart)", display_text="📈 เปิด TradingView")
+                        }
+                    )
                 except Exception as e:
                     st.error(f"เกิดข้อผิดพลาด: {e}")
