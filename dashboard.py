@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Crypto All-in-One Platform", layout="wide")
 
-# --- ดึงข้อมูลรายชื่อเหรียญ (ใช้ Binance.US เพื่อรองรับ Streamlit Cloud) ---
+# --- ดึงข้อมูลรายชื่อเหรียญทั้งหมดที่มีคู่ USDT ---
 @st.cache_data(ttl=86400)
 def get_crypto_usdt_pairs():
     exchange = ccxt.binanceus({'enableRateLimit': True}) 
@@ -16,10 +16,11 @@ def get_crypto_usdt_pairs():
     for attempt in range(retries):
         try:
             markets = exchange.load_markets()
+            # กรองเอาเฉพาะคู่ USDT ที่เปิดเทรดอยู่
             return sorted([symbol for symbol, market in markets.items() if symbol.endswith('/USDT') and market.get('active', True)])
         except Exception as e:
             if attempt == retries - 1:
-                return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'DOGE/USDT']
+                return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT']
             time.sleep(2)
 
 usdt_pairs = get_crypto_usdt_pairs()
@@ -29,11 +30,11 @@ usdt_pairs = get_crypto_usdt_pairs()
 # ==========================================
 st.sidebar.title("🧭 เมนูใช้งานหลัก")
 app_mode = st.sidebar.radio("เลือกฟังก์ชันการทำงาน:", 
-                            ["📊 ระบบทดสอบ (Backtester)", "🚀 เรดาร์หาเหรียญ (Screener)"])
+                            ["📊 ระบบทดสอบ (Backtester)", "🚀 เรดาร์หาเหรียญ (All-Market Screener)"])
 st.sidebar.markdown("---")
 
 # ==========================================
-# โหมดที่ 1: BACKTESTER (ระบบทดสอบกลยุทธ์)
+# โหมดที่ 1: BACKTESTER (เหมือนเดิมเป๊ะๆ)
 # ==========================================
 if app_mode == "📊 ระบบทดสอบ (Backtester)":
     st.title("📊 ระบบทดสอบกลยุทธ์เทรด (Interactive Table)")
@@ -78,9 +79,6 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     else:
         default_rr = 3.0 if "Ichimoku" in strategy_choice else 2.0
         standard_rr = st.sidebar.slider("เป้าหมายกำไรตายตัว (RR)", 1.0, 10.0, default_rr, 0.5)
-
-    st.info(f"💡 **หลักการทำงาน:** {strategy_info[strategy_choice]['desc']}\n\n"
-            f"🔗 **แหล่งอ้างอิงคลิป/บทความ:** [{strategy_info[strategy_choice]['source']}]({strategy_info[strategy_choice]['link']})")
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def load_historical_data(sym, tf, days):
@@ -404,73 +402,65 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     else:
         st.warning("ไม่พบสัญญาณการเข้าเทรด กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
 
-
 # ==========================================
-# โหมดที่ 2: SCREENER (สแกนหาเหรียญน่าเทรด)
+# โหมดที่ 2: ALL-MARKET SCREENER (ของใหม่!)
 # ==========================================
-elif app_mode == "🚀 เรดาร์หาเหรียญ (Screener)":
-    st.title("🚀 เรดาร์หาเหรียญ (Breakout + Volume Screener)")
-    st.write("สแกนหาเหรียญที่ราคากำลังทำ New High ยืนเหนือ EMA200 พร้อมวอลุ่มซื้อที่พุ่งสูงกว่าปกติ (ตามระบบ Breakout + Volume Filter)")
+elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Screener)":
+    st.title("🚀 All-Market Screener (สแกนทุกเหรียญในกระดาน)")
+    st.write("ดึงข้อมูลภาพรวมตลาดทั้งหมดแบบ Real-time แล้วนำมากรองหาเหรียญซิ่ง (Breakout + Volume Surge)")
     
-    st.sidebar.header("⚙️ ตั้งค่า Screener")
-    tf_screen = st.sidebar.selectbox("Timeframe (กราฟ)", ['15m', '1h', '4h', '1d'], index=1)
-    vol_multiplier = st.sidebar.slider("วอลุ่มต้องพุ่งสูงกว่าค่าเฉลี่ยกี่เท่า?", 1.1, 5.0, 1.5)
+    # 1. แถบตั้งค่าการกรอง (Filters)
+    st.sidebar.header("🎯 ฟิลเตอร์กรองเหรียญ (Filters)")
+    min_vol_usdt = st.sidebar.number_input("วอลุ่มเทรดขั้นต่ำ 24 ชม. (USDT)", min_value=0.0, value=1000000.0, step=500000.0, help="กรองเหรียญผี/เหรียญตายออกไป แนะนำตั้งที่ 1 ล้าน USDT ขึ้นไป")
+    price_change_min = st.sidebar.slider("เปอร์เซ็นต์ราคาที่เปลี่ยนไป 24 ชม. ขั้นต่ำ (%)", -50.0, 100.0, 5.0, 1.0, help="กรองเฉพาะเหรียญที่กำลังวิ่งบวกแรงๆ (Breakout)")
     
-    # เลือกเหรียญที่จะสแกน (ดึงรายชื่อเหรียญยอดฮิตมาเป็นค่าตั้งต้น)
-    default_scan_list = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT', 'DOGE/USDT', 'AVAX/USDT', 'LINK/USDT']
-    selected_symbols = st.multiselect("เลือกเหรียญที่ต้องการให้เรดาร์กวาดหาสัญญาณ:", usdt_pairs, default=[s for s in default_scan_list if s in usdt_pairs])
-    
-    if st.button("🔍 เริ่มการสแกนเรดาร์ (Scan Now)", type="primary"):
-        if not selected_symbols:
-            st.error("กรุณาเลือกเหรียญอย่างน้อย 1 ตัวครับ")
-        else:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            results = []
-            exchange = ccxt.binanceus({'enableRateLimit': True})
-            
-            # ต้องดึงข้อมูลย้อนหลังอย่างน้อย 250 แท่ง เพื่อให้คำนวณ EMA200 ได้
-            for i, sym in enumerate(selected_symbols):
-                status_text.text(f"⏳ กำลังสแกน {sym}... ({i+1}/{len(selected_symbols)})")
-                try:
-                    ohlcv = exchange.fetch_ohlcv(sym, timeframe=tf_screen, limit=250)
-                    if len(ohlcv) >= 200:
-                        df_scan = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                        
-                        # คำนวณ Indicator เหมือนระบบ Breakout + Volume Filter เป๊ะๆ
-                        df_scan['ema_200'] = df_scan['close'].ewm(span=200, adjust=False).mean()
-                        df_scan['sma_20'] = df_scan['close'].rolling(window=20).mean()
-                        df_scan['std_20'] = df_scan['close'].rolling(window=20).std()
-                        df_scan['upper_bb'] = df_scan['sma_20'] + (df_scan['std_20'] * 2)
-                        df_scan['vol_ma_20'] = df_scan['volume'].rolling(window=20).mean()
-                        
-                        latest = df_scan.iloc[-1]
-                        
-                        # เงื่อนไข: ยืนเหนือ EMA200 + ทะลุขอบบน Bollinger + วอลุ่มต้องมากกว่าค่าเฉลี่ย x เท่า
-                        is_breakout = (latest['close'] > latest['ema_200']) and (latest['close'] > latest['upper_bb'])
-                        is_vol_surge = latest['volume'] > (latest['vol_ma_20'] * vol_multiplier)
-                        
-                        if is_breakout and is_vol_surge:
-                            results.append({
-                                'เหรียญ (Symbol)': sym,
-                                'ราคาล่าสุด': f"${latest['close']:.4f}",
-                                'เส้น EMA 200': f"${latest['ema_200']:.4f}",
-                                'ขอบบน BB': f"${latest['upper_bb']:.4f}",
-                                'ระดับความแรงวอลุ่ม': f"🔥 {latest['volume'] / latest['vol_ma_20']:.2f} เท่า"
-                            })
-                except Exception:
-                    pass 
+    if st.button("🔍 โหลดข้อมูลและเริ่มสแกนตลาด (Scan Market)", type="primary"):
+        with st.spinner('⏳ กำลังกวาดข้อมูลทุกเหรียญจากกระดาน... (ใช้เวลาประมาณ 3-5 วินาที)'):
+            try:
+                exchange = ccxt.binanceus({'enableRateLimit': True})
+                # ท่าไม้ตาย! ดึงข้อมูลทุกเหรียญพร้อมกันในคำสั่งเดียว
+                tickers = exchange.fetch_tickers() 
                 
-                progress_bar.progress((i + 1) / len(selected_symbols))
-                time.sleep(0.2) 
-            
-            status_text.empty()
-            progress_bar.empty()
-            
-            if results:
-                st.success(f"🎉 สแกนเสร็จสิ้น! พบเหรียญที่มีสัญญาณ 'กระทิงดุ' (Bullish Breakout) จำนวน {len(results)} ตัว")
-                res_df = pd.DataFrame(results)
-                st.dataframe(res_df, use_container_width=True)
-                st.info("💡 นำเหรียญเหล่านี้ไปเปิดในโหมด Backtest เพื่อดูประวัติการทำกำไรย้อนหลังต่อได้เลยครับ!")
-            else:
-                st.warning("😅 สแกนเสร็จสิ้น แต่ช่วงเวลานี้ตลาดยังนิ่งอยู่ ไม่มีเหรียญไหนระเบิดกรอบขึ้นมาเลยครับ (ลองเปลี่ยน Timeframe ให้สั้นลงดูครับ)")
+                market_data = []
+                for symbol, data in tickers.items():
+                    # กรองเอาเฉพาะคู่ USDT 
+                    if symbol.endswith('/USDT'):
+                        # ป้องกันเหรียญที่ข้อมูลไม่ครบ
+                        if data['quoteVolume'] is not None and data['percentage'] is not None and data['last'] is not None:
+                            market_data.append({
+                                'Symbol': symbol,
+                                'Price (USDT)': data['last'],
+                                '24h Change (%)': data['percentage'],
+                                '24h Volume (USDT)': data['quoteVolume'],
+                                '24h High': data['high'],
+                                '24h Low': data['low']
+                            })
+                            
+                df_market = pd.DataFrame(market_data)
+                
+                # 2. นำข้อมูลมาเข้า Filter ตามที่ผู้ใช้ตั้งค่า
+                filtered_df = df_market[
+                    (df_market['24h Volume (USDT)'] >= min_vol_usdt) & 
+                    (df_market['24h Change (%)'] >= price_change_min)
+                ].copy()
+                
+                # จัดเรียงตาม % การขึ้นมากที่สุด
+                filtered_df = filtered_df.sort_values(by='24h Change (%)', ascending=False).reset_index(drop=True)
+                
+                # ตกแต่งตัวเลขให้ดูสวยงาม
+                styled_df = filtered_df.copy()
+                styled_df['Price (USDT)'] = styled_df['Price (USDT)'].apply(lambda x: f"${x:,.4f}")
+                styled_df['24h Change (%)'] = styled_df['24h Change (%)'].apply(lambda x: f"🔥 +{x:.2f}%" if x > 0 else f"{x:.2f}%")
+                styled_df['24h Volume (USDT)'] = styled_df['24h Volume (USDT)'].apply(lambda x: f"${x:,.0f}")
+                styled_df['24h High'] = styled_df['24h High'].apply(lambda x: f"${x:,.4f}")
+                styled_df['24h Low'] = styled_df['24h Low'].apply(lambda x: f"${x:,.4f}")
+                
+                st.success(f"✅ สแกนเจอเหรียญที่เข้าเงื่อนไขทั้งหมด {len(filtered_df)} ตัว (จากทั้งหมด {len(df_market)} ตัวในกระดาน)")
+                
+                # แสดงเป็นตารางที่สามารถคลิกเรียงลำดับหัวข้อได้
+                st.dataframe(styled_df, use_container_width=True)
+                
+                st.info("💡 **วิธีใช้งาน:** เหรียญที่ติดอันดับบนๆ คือเหรียญที่กำลังมีวอลุ่มเข้าและทำราคาทะลุกรอบ (Breakout) คุณสามารถนำชื่อเหรียญเหล่านี้ไปเปิดในแท็บ Backtester เพื่อตรวจสอบอัตราชนะย้อนหลังก่อนเข้าเทรดจริงได้เลยครับ!")
+                
+            except Exception as e:
+                st.error(f"เกิดข้อผิดพลาดในการเชื่อมต่อกับกระดานเทรด: {e}")
