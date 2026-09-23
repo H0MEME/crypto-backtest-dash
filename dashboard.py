@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Crypto Strategy Backtester", layout="wide")
-st.title("📊 ศูนย์รวมระบบทดสอบกลยุทธ์เทรด (มีระบบกราฟส่องไม้เทรด)")
+st.title("📊 ศูนย์รวมระบบทดสอบกลยุทธ์เทรด (Interactive Table)")
 
 strategy_info = {
     "Ichimoku Breakout (Trend 4H)": {
@@ -193,7 +193,7 @@ elif strategy_choice == "EMA Crossover (Classic)":
 
 df = df.dropna().reset_index(drop=True)
 
-# ตัวแปรลอจิก Backtest 
+# ลอจิก Backtest 
 capital = initial_capital
 in_position = False
 position_type = None
@@ -422,27 +422,64 @@ if trades > 0:
     df_show['balance'] = df_show['balance'].apply(lambda x: f"${x:,.2f}")
     df_show = df_show[['entry_date', 'exit_date', 'type', 'result', 'pnl', 'balance']]
     df_show.columns = ['วัน/เวลาเข้า', 'วัน/เวลาออก', 'ฝั่งเทรด', 'ผลลัพธ์', 'กำไร/ขาดทุน', 'เงินคงเหลือ']
-    st.dataframe(df_show, use_container_width=True)
+    
+    st.markdown("💡 **Tip:** คุณสามารถ **คลิกเลือกแถวในตารางด้านล่างนี้** เพื่อเปลี่ยนกราฟวิเคราะห์ไม้เทรดด้านล่างได้ทันทีครับ")
+    
+    # --- ระบบจัดการสถานะ (Session State) เพื่อซิงค์ตารางกับ Dropdown ---
+    if 'visualizer_idx' not in st.session_state:
+        st.session_state.visualizer_idx = 0
+    if 'last_clicked_row' not in st.session_state:
+        st.session_state.last_clicked_row = None
+
+    # วาดตารางแบบโต้ตอบได้ (Interactive)
+    selection_event = st.dataframe(
+        df_show, 
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="single-row"
+    )
+    
+    # ตรวจสอบการคลิกจากตาราง
+    if selection_event.selection.rows:
+        clicked_row = selection_event.selection.rows[0]
+        # อัปเดตเฉพาะเมื่อมีการคลิกแถวใหม่เท่านั้น เพื่อไม่ให้ไปล็อค Dropdown
+        if st.session_state.last_clicked_row != clicked_row:
+            st.session_state.visualizer_idx = clicked_row
+            st.session_state.last_clicked_row = clicked_row
+    else:
+        st.session_state.last_clicked_row = None
 else:
     st.warning("ไม่พบสัญญาณการเข้าเทรด กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
 
-# --- ฟีเจอร์ใหม่: กราฟส่องไม้เทรด (Trade Visualizer) ---
+# --- กราฟส่องไม้เทรด (Trade Visualizer) ---
 if trades > 0:
     st.divider()
     st.subheader("🔎 เจาะลึกกราฟแต่ละไม้เทรด (Trade Visualizer)")
-    st.markdown("ระบบจะดึงกราฟแท่งเทียน **ช่วงก่อนและหลังเข้าออเดอร์** มาแสดงให้เห็นชัดๆ ว่าบอทกดซื้อตรงไหน และขายตรงไหน")
     
-    # สร้างตัวเลือกให้ User กดเลือกไม้เทรด
     trade_options = []
     for i, t in enumerate(trade_history):
         emoji = "🟢" if t['pnl'] > 0 else ("🔴" if t['pnl'] < 0 else "⚪")
         trade_options.append(f"ไม้ที่ {i+1} : {emoji} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}")
     
-    selected_trade_str = st.selectbox("🎯 เลือกไม้เทรดที่ต้องการดูกราฟ:", trade_options)
-    selected_idx = trade_options.index(selected_trade_str)
+    # ถ้ามีการเปลี่ยนกลยุทธ์แล้วจำนวนไม้น้อยลง ป้องกัน Error ทะลุ Index
+    if st.session_state.visualizer_idx >= trades:
+        st.session_state.visualizer_idx = 0
+        
+    def update_visualizer_idx():
+        st.session_state.visualizer_idx = st.session_state.selectbox_idx
+        
+    selected_idx = st.selectbox(
+        "🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ (ตัวเลือกนี้ซิงค์กับตารางด้านบน):", 
+        range(trades),
+        format_func=lambda i: trade_options[i],
+        index=st.session_state.visualizer_idx,
+        key="selectbox_idx",
+        on_change=update_visualizer_idx
+    )
+    
     t_data = trade_history[selected_idx]
     
-    # หาวันที่เข้าและออก เพื่อตัดกราฟมาโชว์เฉพาะช่วงนั้น (+/- 30 แท่ง เพื่อให้เห็นบริบทรอบๆ)
+    # หาวันที่เข้าและออก เพื่อตัดกราฟมาโชว์เฉพาะช่วงนั้น (+/- 30 แท่ง)
     idx_start = df.index[df['timestamp'] == t_data['entry_date']].tolist()[0]
     idx_end = df.index[df['timestamp'] == t_data['exit_date']].tolist()[0]
     
