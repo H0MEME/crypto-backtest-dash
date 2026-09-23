@@ -332,9 +332,6 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0), xaxis_title="จำนวนออเดอร์ที่ปิด (Trades)", yaxis_title="ยอดเงินในพอร์ต ($)", template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
 
-    # ----------------------------------------------------
-    # ส่วนประวัติการเทรดและ Trade Visualizer 
-    # ----------------------------------------------------
     st.subheader("📋 ประวัติการเข้าเทรด")
     if trades > 0:
         df_history = pd.DataFrame(trade_history)
@@ -348,17 +345,10 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
         
         st.markdown("💡 **Tip:** คุณสามารถ **คลิกเลือกแถวในตารางด้านล่างนี้** เพื่อเปลี่ยนกราฟวิเคราะห์ไม้เทรดด้านล่างได้ทันทีครับ")
         
-        if 'selectbox_idx' not in st.session_state:
-            st.session_state.selectbox_idx = 0
-        if 'last_clicked_row' not in st.session_state:
-            st.session_state.last_clicked_row = None
+        if 'selectbox_idx' not in st.session_state: st.session_state.selectbox_idx = 0
+        if 'last_clicked_row' not in st.session_state: st.session_state.last_clicked_row = None
 
-        selection_event = st.dataframe(
-            df_show, 
-            use_container_width=True,
-            on_select="rerun",
-            selection_mode="single-row"
-        )
+        selection_event = st.dataframe(df_show, use_container_width=True, on_select="rerun", selection_mode="single-row")
         
         if selection_event.selection.rows:
             clicked_row = selection_event.selection.rows[0]
@@ -370,65 +360,32 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
             
         st.divider()
         st.subheader("🔎 เจาะลึกกราฟแต่ละไม้เทรด (Trade Visualizer)")
-        
-        trade_options = []
-        for i, t in enumerate(trade_history):
-            emoji = "🟢" if t['pnl'] > 0 else ("🔴" if t['pnl'] < 0 else "⚪")
-            trade_options.append(f"ไม้ที่ {i+1} : {emoji} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}")
+        trade_options = [f"ไม้ที่ {i+1} : {'🟢' if t['pnl']>0 else ('🔴' if t['pnl']<0 else '⚪')} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}" for i, t in enumerate(trade_history)]
         
         current_val = st.session_state.get('selectbox_idx', 0)
-        try:
-            valid_idx = int(current_val)
-        except:
-            valid_idx = 0 
-            
-        if valid_idx >= trades or valid_idx < 0:
-            valid_idx = 0
-            
+        try: valid_idx = int(current_val)
+        except: valid_idx = 0 
+        if valid_idx >= trades or valid_idx < 0: valid_idx = 0
         st.session_state.selectbox_idx = valid_idx
             
-        selected_idx = st.selectbox(
-            "🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ (ตัวเลือกนี้ซิงค์กับตารางด้านบน):", 
-            range(trades),
-            format_func=lambda i: trade_options[i],
-            key="selectbox_idx" 
-        )
+        selected_idx = st.selectbox("🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ:", range(trades), format_func=lambda i: trade_options[i], key="selectbox_idx")
         
         t_data = trade_history[selected_idx]
-        
         idx_start = df.index[df['timestamp'] == t_data['entry_date']].tolist()[0]
         idx_end = df.index[df['timestamp'] == t_data['exit_date']].tolist()[0]
-        
         plot_start = max(0, idx_start - 30)
         plot_end = min(len(df) - 1, idx_end + 30)
         df_plot = df.iloc[plot_start:plot_end+1]
         
-        fig2 = go.Figure(data=[go.Candlestick(x=df_plot['timestamp'],
-                        open=df_plot['open'], high=df_plot['high'],
-                        low=df_plot['low'], close=df_plot['close'],
-                        name='Candles')])
-                        
-        fig2.add_trace(go.Scatter(x=[t_data['entry_date']], y=[t_data['entry_price']],
-                                  mode='markers', marker=dict(size=14, color='cyan', symbol='star'),
-                                  name='🌟 จุดเข้า (Entry)'))
-        fig2.add_trace(go.Scatter(x=[t_data['exit_date']], y=[t_data['exit_price']],
-                                  mode='markers', marker=dict(size=14, color='magenta', symbol='x'),
-                                  name='❌ จุดออก (Exit)'))
-                                  
-        fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['initial_sl'],
-                       x1=df_plot['timestamp'].iloc[-1], y1=t_data['initial_sl'],
-                       line=dict(color="red", width=2, dash="dash"))
-        fig2.add_annotation(x=df_plot['timestamp'].iloc[15], y=t_data['initial_sl'],
-                            text="เส้น Stop Loss", showarrow=False, yshift=15, font=dict(color="red"))
-                            
-        fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['entry_price'],
-                       x1=df_plot['timestamp'].iloc[-1], y1=t_data['entry_price'],
-                       line=dict(color="cyan", width=1, dash="dot"))
-                       
-        fig2.update_layout(height=500, template='plotly_dark', xaxis_rangeslider_visible=False,
-                           title=f"วิเคราะห์ไม้เทรดที่ {selected_idx+1} (สถานะ: {t_data['result']})")
+        fig2 = go.Figure(data=[go.Candlestick(x=df_plot['timestamp'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'], name='Candles')])
+        fig2.add_trace(go.Scatter(x=[t_data['entry_date']], y=[t_data['entry_price']], mode='markers', marker=dict(size=14, color='cyan', symbol='star'), name='🌟 จุดเข้า'))
+        fig2.add_trace(go.Scatter(x=[t_data['exit_date']], y=[t_data['exit_price']], mode='markers', marker=dict(size=14, color='magenta', symbol='x'), name='❌ จุดออก'))
+        fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['initial_sl'], x1=df_plot['timestamp'].iloc[-1], y1=t_data['initial_sl'], line=dict(color="red", width=2, dash="dash"))
+        fig2.add_annotation(x=df_plot['timestamp'].iloc[15], y=t_data['initial_sl'], text="เส้น Stop Loss", showarrow=False, yshift=15, font=dict(color="red"))
+        fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['entry_price'], x1=df_plot['timestamp'].iloc[-1], y1=t_data['entry_price'], line=dict(color="cyan", width=1, dash="dot"))
+        
+        fig2.update_layout(height=500, template='plotly_dark', xaxis_rangeslider_visible=False, title=f"วิเคราะห์ไม้เทรดที่ {selected_idx+1} (สถานะ: {t_data['result']})")
         st.plotly_chart(fig2, use_container_width=True)
-
     else:
         st.warning("ไม่พบสัญญาณการเข้าเทรด หรือข้อมูลเหรียญในอดีตมีไม่เพียงพอ กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
 
@@ -437,7 +394,7 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
 # ==========================================
 elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Screener)":
     st.title("🚀 All-Market Strategy Screener")
-    st.write("ระบบจะกวาดข้อมูลเหรียญทั้งตลาด เพื่อหาสัญญาณการเข้าเทรด **'ณ เวลานี้'** ตามกลยุทธ์ที่คุณเลือก พร้อมลิงก์เปิดกราฟ TradingView")
+    st.write("ระบบจะกวาดข้อมูลเหรียญทั้งตลาด เพื่อหาสัญญาณการเข้าเทรด **'ณ เวลานี้'** ตามกลยุทธ์ที่คุณเลือก พร้อมจำลองแผนการเทรด (TP/SL) ให้ทันที")
     
     screen_mode = st.radio("เลือกรูปแบบการสแกน:", ["1. สแกนหาสัญญาณเข้าเทรดรายกลยุทธ์ (Signal Finder)", "2. สแกนภาพรวมตลาด (Market Overview)"], horizontal=True)
     st.markdown("---")
@@ -451,11 +408,16 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
         else: default_tf_scan = 1
         
         tf_screen = st.sidebar.selectbox("Timeframe (กราฟ)", ['15m', '1h', '4h', '1d'], index=default_tf_scan)
-        min_vol = st.sidebar.number_input("คัดเฉพาะเหรียญที่มี Volume (USDT) มากกว่า:", min_value=0.0, value=3000000.0, step=1000000.0, help="คัดเหรียญสภาพคล่องต่ำออก เพื่อให้บอทสแกนได้เร็วขึ้น")
+        min_vol = st.sidebar.number_input("คัดเฉพาะเหรียญที่มี Volume (USDT) มากกว่า:", min_value=0.0, value=3000000.0, step=1000000.0)
+        
+        # --- นำระบบตั้งค่า RR ของ Backtest มาใส่ใน Screener ด้วย ---
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🛡️ การตั้งค่าแผนการเทรด (TP/SL)")
+        rr_setting = st.sidebar.slider("เป้าหมายทำกำไร (Risk:Reward)", 1.0, 10.0, 2.0, 0.5, help="ระบบจะนำค่านี้ไปคำนวณเส้น Take Profit สีเขียวให้ในกราฟจำลอง")
         
         st.sidebar.markdown("---")
         st.sidebar.subheader("ตัวกรองพิเศษ (Extra Filters)")
-        use_rsi_filter = st.sidebar.checkbox("เปิดใช้ตัวกรอง RSI (หลีกเลี่ยงการไล่ราคา)", value=True, help="Long: RSI ต้อง < 70 (ไม่ Overbought) | Short: RSI ต้อง > 30 (ไม่ Oversold)")
+        use_rsi_filter = st.sidebar.checkbox("เปิดใช้ตัวกรอง RSI (หลีกเลี่ยงการไล่ราคา)", value=True)
 
         if st.button(f"🔍 เริ่มสแกนหาสัญญาณ {selected_strategy} ทั้งตลาด", type="primary"):
             exchange = ccxt.binanceus({'enableRateLimit': True})
@@ -475,15 +437,17 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
             progress_bar = st.progress(0)
             status_text = st.empty()
             results = []
+            screener_charts_data = {} # เก็บข้อมูลกราฟไว้แสดงด้านล่าง
             
             status_text.text(f"⏳ [ขั้นตอนที่ 2/2] กำลังคำนวณกราฟ {tf_screen} ตามสูตร {selected_strategy}...")
             
             for i, sym in enumerate(filtered_symbols):
                 try:
-                    ohlcv = exchange.fetch_ohlcv(sym, timeframe=tf_screen, limit=250)
-                    if len(ohlcv) < 200: continue
+                    ohlcv = exchange.fetch_ohlcv(sym, timeframe=tf_screen, limit=100) # ดึงแค่ 100 แท่งพอให้กราฟดูรู้เรื่อง
+                    if len(ohlcv) < 60: continue
                     
                     df_scan = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    df_scan['timestamp'] = pd.to_datetime(df_scan['timestamp'], unit='ms') + pd.Timedelta(hours=7) 
                     
                     delta = df_scan['close'].diff()
                     gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
@@ -498,8 +462,8 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                     df_scan['atr_14'] = df_scan['tr'].ewm(alpha=1/14, adjust=False).mean()
 
                     latest = df_scan.iloc[-1] 
-                    prev = df_scan.iloc[-2]   
                     signal = None
+                    sl_price = 0
                     
                     if selected_strategy == "Ichimoku Breakout (Trend 4H)":
                         df_scan['tenkan'] = (df_scan['high'].rolling(window=9).max() + df_scan['low'].rolling(window=9).min()) / 2
@@ -519,8 +483,10 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                         curr = df_scan.iloc[-1]
                         if curr['close'] > max(curr['senkou_a'], curr['senkou_b']) and curr['tenkan'] > curr['kijun'] and curr['close'] > curr['ema_200'] and curr['adx'] > 25:
                             signal = 'LONG 🟢'
+                            sl_price = curr['close'] - (curr['atr_14'] * 2)
                         elif curr['close'] < min(curr['senkou_a'], curr['senkou_b']) and curr['tenkan'] < curr['kijun'] and curr['close'] < curr['ema_200'] and curr['adx'] > 25:
                             signal = 'SHORT 🔴'
+                            sl_price = curr['close'] + (curr['atr_14'] * 2)
                             
                     elif selected_strategy == "Breakout + Volume Filter":
                         df_scan['ema_200'] = df_scan['close'].ewm(span=200, adjust=False).mean()
@@ -533,16 +499,21 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                         curr = df_scan.iloc[-1]
                         if curr['close'] > curr['ema_200'] and curr['close'] > curr['upper_bb'] and curr['volume'] > curr['vol_ma_20'] * 1.5:
                             signal = 'LONG 🟢'
+                            sl_price = curr['close'] - (curr['atr_14'] * 2)
                         elif curr['close'] < curr['ema_200'] and curr['close'] < curr['lower_bb'] and curr['volume'] > curr['vol_ma_20'] * 1.5:
                             signal = 'SHORT 🔴'
+                            sl_price = curr['close'] + (curr['atr_14'] * 2)
 
                     elif selected_strategy == "EMA Crossover (Classic)":
                         df_scan['ema_12'] = df_scan['close'].ewm(span=12, adjust=False).mean()
                         df_scan['ema_26'] = df_scan['close'].ewm(span=26, adjust=False).mean()
+                        curr = df_scan.iloc[-1]
                         if df_scan['ema_12'].iloc[-2] <= df_scan['ema_26'].iloc[-2] and df_scan['ema_12'].iloc[-1] > df_scan['ema_26'].iloc[-1]:
                             signal = 'LONG 🟢'
+                            sl_price = curr['close'] - (curr['atr_14'] * 2)
                         elif df_scan['ema_12'].iloc[-2] >= df_scan['ema_26'].iloc[-2] and df_scan['ema_12'].iloc[-1] < df_scan['ema_26'].iloc[-1]:
                             signal = 'SHORT 🔴'
+                            sl_price = curr['close'] + (curr['atr_14'] * 2)
                             
                     elif selected_strategy == "ATR Fibonacci Pocket (Pullback)":
                         weights = np.arange(1, 101)
@@ -550,28 +521,40 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                         df_scan['wma_100'] = np.concatenate((np.full(99, np.nan), wma_100))
                         curr = df_scan.iloc[-1]
                         if curr['close'] > curr['wma_100'] and curr['low'] < (curr['wma_100'] - (curr['atr_14'] * 1.5)) and curr['close'] > curr['open']:
-                            signal = 'PULLBACK LONG 🟢'
+                            signal = 'LONG (Pullback) 🟢'
+                            sl_price = curr['low'] - (curr['atr_14'] * 0.5)
 
                     rsi_val = latest['rsi_14']
                     if signal and use_rsi_filter:
-                        if 'LONG' in signal and rsi_val >= 70:
-                            signal = None 
-                        elif 'SHORT' in signal and rsi_val <= 30:
-                            signal = None 
+                        if 'LONG' in signal and rsi_val >= 70: signal = None 
+                        elif 'SHORT' in signal and rsi_val <= 30: signal = None 
 
                     if signal:
-                        # สร้างลิงก์ TradingView แบบตัดเครื่องหมาย / ออก เช่น BTCUSDT
+                        entry_price = latest['close']
+                        risk = abs(entry_price - sl_price)
+                        tp_price = entry_price + (risk * rr_setting) if 'LONG' in signal else entry_price - (risk * rr_setting)
+                        
                         tv_symbol = sym.replace("/", "")
                         tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCEUS:{tv_symbol}"
                         
                         results.append({
                             'เหรียญ (Symbol)': sym,
                             'สัญญาณ (Signal)': signal,
-                            'ราคา (Price)': f"${latest['close']:.4f}",
-                            'RSI (14)': f"{rsi_val:.1f}",
-                            'คำแนะนำ': "เทรดได้เลย (RSI ปลอดภัย)" if use_rsi_filter else ("Overbought ระวัง!" if rsi_val > 70 else ("Oversold ระวัง!" if rsi_val < 30 else "ปกติ")),
-                            'ดูกราฟ (Chart)': tv_link
+                            'ราคา (Entry)': f"${entry_price:.4f}",
+                            'จุดตัดขาดทุน (SL)': f"${sl_price:.4f}",
+                            'เป้าทำกำไร (TP)': f"${tp_price:.4f}",
+                            'RSI': f"{rsi_val:.1f}",
+                            'TradingView': tv_link
                         })
+                        
+                        # เก็บข้อมูลไว้สำหรับวาดกราฟด้านล่าง
+                        screener_charts_data[sym] = {
+                            'df': df_scan.tail(60), # ตัดมาวาดแค่ 60 แท่งล่าสุดพอ
+                            'entry': entry_price,
+                            'sl': sl_price,
+                            'tp': tp_price,
+                            'signal': signal
+                        }
                         
                 except Exception:
                     pass
@@ -583,17 +566,47 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
             status_text.empty()
             
             if results:
-                st.success(f"🎉 แจ็คพอต! เจอเหรียญที่มีสัญญาณ {selected_strategy} กำลังเกิด ณ เวลานี้ จำนวน {len(results)} ตัว!")
+                st.success(f"🎉 แจ็คพอต! เจอเหรียญที่มีสัญญาณ {selected_strategy} พร้อมคำนวณเป้าหมาย (TP/SL) ให้เสร็จสรรพ!")
                 
-                # แสดงผลแบบมี LinkColumn เพื่อให้คลิกเปิด TradingView ได้เลย
+                df_res = pd.DataFrame(results)
+                
                 st.dataframe(
-                    pd.DataFrame(results), 
+                    df_res, 
                     use_container_width=True,
                     column_config={
-                        "ดูกราฟ (Chart)": st.column_config.LinkColumn("ดูกราฟ (Chart)", display_text="📈 เปิด TradingView")
+                        "TradingView": st.column_config.LinkColumn("ดูกราฟเต็ม (Chart)", display_text="📈 เปิด TradingView")
                     }
                 )
-                st.info("💡 **นำชื่อเหรียญที่ได้ ไปกรอกในบอทยิงออเดอร์ (Bot.py) ของคุณได้เลยครับ!**")
+                
+                # --- สร้าง Setup Visualizer ใต้ตาราง สแกนเนอร์ ---
+                st.divider()
+                st.subheader("🔎 ส่องกราฟแผนการเทรด (Setup Visualizer)")
+                st.markdown("ระบบจำลองหน้าต่างเข้าออเดอร์ให้คุณเห็นภาพชัดๆ โดยใช้การคำนวณ SL ตามระบบ และ TP ตาม RR ที่คุณตั้งค่าไว้แถบด้านซ้าย")
+                
+                selected_coin = st.selectbox("🎯 เลือกเหรียญที่สแกนเจอเพื่อดูกราฟ:", [r['เหรียญ (Symbol)'] for r in results])
+                
+                if selected_coin in screener_charts_data:
+                    c_data = screener_charts_data[selected_coin]
+                    c_df = c_data['df']
+                    
+                    fig_s = go.Figure(data=[go.Candlestick(x=c_df['timestamp'], open=c_df['open'], high=c_df['high'], low=c_df['low'], close=c_df['close'], name='Candles')])
+                    
+                    # วาดเส้น Entry, SL, TP
+                    fig_s.add_shape(type="line", x0=c_df['timestamp'].iloc[0], y0=c_data['entry'], x1=c_df['timestamp'].iloc[-1], y1=c_data['entry'], line=dict(color="cyan", width=2, dash="dot"))
+                    fig_s.add_annotation(x=c_df['timestamp'].iloc[5], y=c_data['entry'], text="เส้นเข้าซื้อ (Entry)", showarrow=False, yshift=15, font=dict(color="cyan"))
+                    
+                    fig_s.add_shape(type="line", x0=c_df['timestamp'].iloc[0], y0=c_data['sl'], x1=c_df['timestamp'].iloc[-1], y1=c_data['sl'], line=dict(color="red", width=2, dash="dash"))
+                    fig_s.add_annotation(x=c_df['timestamp'].iloc[5], y=c_data['sl'], text="จุดตัดขาดทุน (SL)", showarrow=False, yshift=-15 if 'LONG' in c_data['signal'] else 15, font=dict(color="red"))
+                    
+                    fig_s.add_shape(type="line", x0=c_df['timestamp'].iloc[0], y0=c_data['tp'], x1=c_df['timestamp'].iloc[-1], y1=c_data['tp'], line=dict(color="lime", width=2, dash="dash"))
+                    fig_s.add_annotation(x=c_df['timestamp'].iloc[5], y=c_data['tp'], text=f"เป้ากำไร (TP) [RR 1:{rr_setting}]", showarrow=False, yshift=15 if 'LONG' in c_data['signal'] else -15, font=dict(color="lime"))
+                    
+                    # จุดดาวที่แท่งปัจจุบัน
+                    fig_s.add_trace(go.Scatter(x=[c_df['timestamp'].iloc[-1]], y=[c_data['entry']], mode='markers', marker=dict(size=16, color='yellow', symbol='star'), name='🌟 สัญญาณปัจจุบัน'))
+                    
+                    fig_s.update_layout(height=500, template='plotly_dark', xaxis_rangeslider_visible=False, title=f"แผนการเทรด {selected_coin} | สัญญาณ: {c_data['signal']}")
+                    st.plotly_chart(fig_s, use_container_width=True)
+                    
             else:
                 st.warning(f"😅 ขณะนี้ตลาดนิ่ง ไม่มีเหรียญไหนเกิดสัญญาณ {selected_strategy} เลยครับ (ระบบบอทที่ดีคือการ 'นั่งทับมือ' ในเวลาที่ไม่มีสัญญาณครับ)")
 
@@ -630,8 +643,6 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                     styled_df['24h Volume'] = styled_df['24h Volume'].apply(lambda x: f"${x:,.0f}")
                     
                     st.success(f"✅ เจอเหรียญทะลุกรอบกระดานทั้งหมด {len(filtered_df)} ตัว")
-                    
-                    # แสดงผลแบบมี LinkColumn 
                     st.dataframe(
                         styled_df, 
                         use_container_width=True,
