@@ -39,7 +39,7 @@ strategy_info = {
 }
 
 # ==========================================
-# โหมดที่ 1: BACKTESTER (พร้อมกราฟแท่งเทียน)
+# โหมดที่ 1: BACKTESTER
 # ==========================================
 if app_mode == "📊 ระบบทดสอบ (Backtester)":
     st.title("📊 ระบบทดสอบกลยุทธ์เทรด (Interactive Table)")
@@ -109,7 +109,6 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
         st.error("ไม่พบข้อมูล กรุณาลองเปลี่ยนเหรียญหรือลดเวลาลง")
         st.stop()
 
-    # --- Indicator Calculations ---
     df['tr0'] = abs(df['high'] - df['low'])
     df['tr1'] = abs(df['high'] - df['close'].shift())
     df['tr2'] = abs(df['low'] - df['close'].shift())
@@ -159,7 +158,6 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
 
     df = df.dropna().reset_index(drop=True)
 
-    # --- Backtest Core ---
     capital = initial_capital
     in_position, position_type = False, None
     entry_price, sl_price, position_size = 0, 0, 0
@@ -335,7 +333,7 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     st.plotly_chart(fig, use_container_width=True)
 
     # ----------------------------------------------------
-    # ส่วนประวัติการเทรดและ Trade Visualizer (ที่เผลอตัดออกไป)
+    # ส่วนประวัติการเทรดและ Trade Visualizer 
     # ----------------------------------------------------
     st.subheader("📋 ประวัติการเข้าเทรด")
     if trades > 0:
@@ -350,7 +348,8 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
         
         st.markdown("💡 **Tip:** คุณสามารถ **คลิกเลือกแถวในตารางด้านล่างนี้** เพื่อเปลี่ยนกราฟวิเคราะห์ไม้เทรดด้านล่างได้ทันทีครับ")
         
-        if 'selectbox_idx' not in st.session_state:
+        # --- ดักจับ Error NoneType สำหรับ Session State ---
+        if 'selectbox_idx' not in st.session_state or st.session_state.selectbox_idx is None:
             st.session_state.selectbox_idx = 0
         if 'last_clicked_row' not in st.session_state:
             st.session_state.last_clicked_row = None
@@ -378,8 +377,13 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
             emoji = "🟢" if t['pnl'] > 0 else ("🔴" if t['pnl'] < 0 else "⚪")
             trade_options.append(f"ไม้ที่ {i+1} : {emoji} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}")
         
-        if st.session_state.selectbox_idx >= trades:
+        # --- ป้องกันบั๊กค่าเกินหรือเป็นค่าว่าง ---
+        if st.session_state.get('selectbox_idx') is None:
             st.session_state.selectbox_idx = 0
+        if int(st.session_state.selectbox_idx) >= trades:
+            st.session_state.selectbox_idx = 0
+            
+        st.session_state.selectbox_idx = int(st.session_state.selectbox_idx)
             
         selected_idx = st.selectbox(
             "🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ (ตัวเลือกนี้ซิงค์กับตารางด้านบน):", 
@@ -426,9 +430,8 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     else:
         st.warning("ไม่พบสัญญาณการเข้าเทรด หรือข้อมูลเหรียญในอดีตมีไม่เพียงพอ กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
 
-
 # ==========================================
-# โหมดที่ 2: ALL-MARKET SCREENER (NEW - อัปเกรดแยกตามกลยุทธ์)
+# โหมดที่ 2: ALL-MARKET SCREENER
 # ==========================================
 elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Screener)":
     st.title("🚀 All-Market Strategy Screener")
@@ -437,7 +440,6 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
     screen_mode = st.radio("เลือกรูปแบบการสแกน:", ["1. สแกนหาสัญญาณเข้าเทรดรายกลยุทธ์ (Signal Finder)", "2. สแกนภาพรวมตลาด (Market Overview)"], horizontal=True)
     st.markdown("---")
 
-    # --- รูปแบบที่ 1: สแกนหาสัญญาณของแต่ละระบบ ---
     if screen_mode == "1. สแกนหาสัญญาณเข้าเทรดรายกลยุทธ์ (Signal Finder)":
         st.sidebar.header("🎯 ตั้งค่า Screener หาสัญญาณ")
         selected_strategy = st.sidebar.selectbox("เลือกกลยุทธ์ที่ต้องการสแกน", list(strategy_info.keys()))
@@ -580,8 +582,6 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
             else:
                 st.warning(f"😅 ขณะนี้ตลาดนิ่ง ไม่มีเหรียญไหนเกิดสัญญาณ {selected_strategy} เลยครับ (ระบบบอทที่ดีคือการ 'นั่งทับมือ' ในเวลาที่ไม่มีสัญญาณครับ)")
 
-
-    # --- รูปแบบที่ 2: สแกนภาพรวมตลาด (Market Overview) ---
     elif screen_mode == "2. สแกนภาพรวมตลาด (Market Overview)":
         st.sidebar.header("🎯 ฟิลเตอร์กรองภาพรวม (Filters)")
         min_vol_usdt = st.sidebar.number_input("วอลุ่มเทรดขั้นต่ำ (USDT)", min_value=0.0, value=1000000.0, step=500000.0)
