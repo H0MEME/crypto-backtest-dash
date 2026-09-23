@@ -42,17 +42,15 @@ strategy_info = {
     }
 }
 
-# --- แก้ปัญหา Cloud โดนบล็อก: เปลี่ยนมาดึงข้อมูลจาก Bybit แทน Binance ---
+# --- เปลี่ยนมาใช้ Binance.US เพื่อรองรับ IP อเมริกาของ Streamlit Cloud ---
 @st.cache_data(ttl=86400)
 def get_crypto_usdt_pairs():
-    # ใช้ Bybit เพื่อเลี่ยงการบล็อก IP สหรัฐอเมริกาของ Streamlit Cloud
-    exchange = ccxt.bybit({'enableRateLimit': True}) 
+    exchange = ccxt.binanceus({'enableRateLimit': True}) 
     retries = 3
     for attempt in range(retries):
         try:
             markets = exchange.load_markets()
-            # คัดกรองเอาเฉพาะคู่เทรด Spot ปกติที่ลงท้ายด้วย /USDT
-            return sorted([symbol for symbol, market in markets.items() if symbol.endswith('/USDT') and market.get('spot', False) and market.get('active', True)])
+            return sorted([symbol for symbol, market in markets.items() if symbol.endswith('/USDT') and market.get('active', True)])
         except Exception as e:
             if attempt == retries - 1:
                 st.error(f"ไม่สามารถโหลดรายชื่อเหรียญได้: {e}")
@@ -101,10 +99,10 @@ else:
 st.info(f"💡 **หลักการทำงาน:** {strategy_info[strategy_choice]['desc']}\n\n"
         f"🔗 **แหล่งอ้างอิงคลิป/บทความ:** [{strategy_info[strategy_choice]['source']}]({strategy_info[strategy_choice]['link']})")
 
-# --- ดึงกราฟจาก Bybit แบบปลอดภัย ---
+# --- ดึงข้อมูลจาก Binance.US (ไม่โดนบล็อก IP) ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_historical_data(sym, tf, days):
-    exchange = ccxt.bybit({'enableRateLimit': True}) # เปลี่ยนมาใช้ Bybit
+    exchange = ccxt.binanceus({'enableRateLimit': True})
     start_time = datetime.now() - timedelta(days=days)
     since = int(start_time.timestamp() * 1000)
     all_bars = []
@@ -114,7 +112,6 @@ def load_historical_data(sym, tf, days):
     
     while True:
         try:
-            # Bybit ดึงกราฟได้ทีละ 1000 แท่งเหมือนกันเป๊ะ
             bars = exchange.fetch_ohlcv(sym, timeframe=tf, since=since, limit=1000)
             if not bars: break
             all_bars.extend(bars)
