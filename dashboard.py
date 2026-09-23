@@ -332,7 +332,7 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0), xaxis_title="จำนวนออเดอร์ที่ปิด (Trades)", yaxis_title="ยอดเงินในพอร์ต ($)", template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
 
-    # ----------------------------------------------------
+   # ----------------------------------------------------
     # ส่วนประวัติการเทรดและ Trade Visualizer 
     # ----------------------------------------------------
     st.subheader("📋 ประวัติการเข้าเทรด")
@@ -348,8 +348,7 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
         
         st.markdown("💡 **Tip:** คุณสามารถ **คลิกเลือกแถวในตารางด้านล่างนี้** เพื่อเปลี่ยนกราฟวิเคราะห์ไม้เทรดด้านล่างได้ทันทีครับ")
         
-        # --- ดักจับ Error NoneType สำหรับ Session State ---
-        if 'selectbox_idx' not in st.session_state or st.session_state.selectbox_idx is None:
+        if 'selectbox_idx' not in st.session_state:
             st.session_state.selectbox_idx = 0
         if 'last_clicked_row' not in st.session_state:
             st.session_state.last_clicked_row = None
@@ -377,13 +376,20 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
             emoji = "🟢" if t['pnl'] > 0 else ("🔴" if t['pnl'] < 0 else "⚪")
             trade_options.append(f"ไม้ที่ {i+1} : {emoji} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}")
         
-        # --- ป้องกันบั๊กค่าเกินหรือเป็นค่าว่าง ---
-        if st.session_state.get('selectbox_idx') is None:
-            st.session_state.selectbox_idx = 0
-        if int(st.session_state.selectbox_idx) >= trades:
-            st.session_state.selectbox_idx = 0
+        # ==========================================
+        # 🔥 ท่อนที่แก้ไขใหม่: ดัก Error ค่าแปลกปลอมขั้นเด็ดขาด 🔥
+        # ==========================================
+        current_val = st.session_state.get('selectbox_idx', 0)
+        try:
+            valid_idx = int(current_val)
+        except:
+            valid_idx = 0 # ถ้าพังให้กลับไปที่ไม้ที่ 1 (index 0)
             
-        st.session_state.selectbox_idx = int(st.session_state.selectbox_idx)
+        if valid_idx >= trades or valid_idx < 0:
+            valid_idx = 0
+            
+        st.session_state.selectbox_idx = valid_idx
+        # ==========================================
             
         selected_idx = st.selectbox(
             "🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ (ตัวเลือกนี้ซิงค์กับตารางด้านบน):", 
@@ -429,7 +435,6 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
 
     else:
         st.warning("ไม่พบสัญญาณการเข้าเทรด หรือข้อมูลเหรียญในอดีตมีไม่เพียงพอ กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
-
 # ==========================================
 # โหมดที่ 2: ALL-MARKET SCREENER
 # ==========================================
