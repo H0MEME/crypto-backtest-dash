@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Crypto Strategy Backtester", layout="wide")
-st.title("📊 ศูนย์รวมระบบทดสอบกลยุทธ์เทรด (Cloud Optimized)")
+st.title("📊 ศูนย์รวมระบบทดสอบกลยุทธ์เทรด (มีระบบกราฟส่องไม้เทรด)")
 
 strategy_info = {
     "Ichimoku Breakout (Trend 4H)": {
@@ -42,7 +42,7 @@ strategy_info = {
     }
 }
 
-# --- เปลี่ยนมาใช้ Binance.US เพื่อรองรับ IP อเมริกาของ Streamlit Cloud ---
+# --- ดึงข้อมูลจาก Binance.US ---
 @st.cache_data(ttl=86400)
 def get_crypto_usdt_pairs():
     exchange = ccxt.binanceus({'enableRateLimit': True}) 
@@ -99,7 +99,6 @@ else:
 st.info(f"💡 **หลักการทำงาน:** {strategy_info[strategy_choice]['desc']}\n\n"
         f"🔗 **แหล่งอ้างอิงคลิป/บทความ:** [{strategy_info[strategy_choice]['source']}]({strategy_info[strategy_choice]['link']})")
 
-# --- ดึงข้อมูลจาก Binance.US (ไม่โดนบล็อก IP) ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_historical_data(sym, tf, days):
     exchange = ccxt.binanceus({'enableRateLimit': True})
@@ -194,11 +193,12 @@ elif strategy_choice == "EMA Crossover (Classic)":
 
 df = df.dropna().reset_index(drop=True)
 
-# ลอจิก Backtest 
+# ตัวแปรลอจิก Backtest 
 capital = initial_capital
 in_position = False
 position_type = None
 entry_price, sl_price, position_size = 0, 0, 0
+current_entry_time, initial_sl_price = None, 0
 
 remaining_size, trade_pnl = 0, 0.0
 is_partial, is_breakeven = False, False
@@ -228,7 +228,7 @@ for i in range(10, len(df)):
                 capital += pnl_this_exit
                 equity_curve.append(capital)
                 res_str = 'ชนะ (Win)' if trade_pnl > 0 else ('เสมอ (Breakeven)' if trade_pnl == 0 else 'แพ้ (Loss)')
-                trade_history.append({'date': row['timestamp'], 'type': 'LONG', 'result': res_str, 'pnl': trade_pnl, 'balance': capital})
+                trade_history.append({'entry_date': current_entry_time, 'exit_date': row['timestamp'], 'type': 'LONG', 'result': res_str, 'pnl': trade_pnl, 'balance': capital, 'entry_price': entry_price, 'initial_sl': initial_sl_price, 'exit_price': sl_price})
                 in_position = False
                 continue
 
@@ -246,7 +246,7 @@ for i in range(10, len(df)):
                 trade_pnl += pnl_this_exit
                 capital += pnl_this_exit
                 equity_curve.append(capital)
-                trade_history.append({'date': row['timestamp'], 'type': 'LONG', 'result': 'ชนะ (Win)', 'pnl': trade_pnl, 'balance': capital})
+                trade_history.append({'entry_date': current_entry_time, 'exit_date': row['timestamp'], 'type': 'LONG', 'result': 'ชนะ (Win)', 'pnl': trade_pnl, 'balance': capital, 'entry_price': entry_price, 'initial_sl': initial_sl_price, 'exit_price': final_tp_price})
                 in_position = False
                 
         elif position_type == 'SHORT':
@@ -256,7 +256,7 @@ for i in range(10, len(df)):
                 capital += pnl_this_exit
                 equity_curve.append(capital)
                 res_str = 'ชนะ (Win)' if trade_pnl > 0 else ('เสมอ (Breakeven)' if trade_pnl == 0 else 'แพ้ (Loss)')
-                trade_history.append({'date': row['timestamp'], 'type': 'SHORT', 'result': res_str, 'pnl': trade_pnl, 'balance': capital})
+                trade_history.append({'entry_date': current_entry_time, 'exit_date': row['timestamp'], 'type': 'SHORT', 'result': res_str, 'pnl': trade_pnl, 'balance': capital, 'entry_price': entry_price, 'initial_sl': initial_sl_price, 'exit_price': sl_price})
                 in_position = False
                 continue
 
@@ -273,7 +273,7 @@ for i in range(10, len(df)):
                 trade_pnl += pnl_this_exit
                 capital += pnl_this_exit
                 equity_curve.append(capital)
-                trade_history.append({'date': row['timestamp'], 'type': 'SHORT', 'result': 'ชนะ (Win)', 'pnl': trade_pnl, 'balance': capital})
+                trade_history.append({'entry_date': current_entry_time, 'exit_date': row['timestamp'], 'type': 'SHORT', 'result': 'ชนะ (Win)', 'pnl': trade_pnl, 'balance': capital, 'entry_price': entry_price, 'initial_sl': initial_sl_price, 'exit_price': final_tp_price})
                 in_position = False
         continue
 
@@ -377,6 +377,8 @@ for i in range(10, len(df)):
                 in_position, position_type, just_entered = True, 'LONG', True
 
     if just_entered:
+        current_entry_time = row['timestamp']
+        initial_sl_price = sl_price
         risk_distance = abs(entry_price - sl_price)
         remaining_size = position_size
         trade_pnl = 0.0
@@ -390,6 +392,7 @@ for i in range(10, len(df)):
             partial_tp_price = final_tp_price
             be_trigger_price = float('inf') if position_type == 'LONG' else 0
 
+# 7. สรุปผลลัพธ์
 trades = len(trade_history)
 wins = sum(1 for t in trade_history if t['pnl'] > 0)
 losses = sum(1 for t in trade_history if t['pnl'] < 0)
@@ -412,10 +415,67 @@ st.plotly_chart(fig, use_container_width=True)
 st.subheader("📋 ประวัติการเข้าเทรด")
 if trades > 0:
     df_history = pd.DataFrame(trade_history)
-    df_history['date'] = df_history['date'].dt.strftime('%d/%m/%Y %H:%M')
-    df_history['pnl'] = df_history['pnl'].apply(lambda x: f"{'+' if x>0 else ''}${x:,.2f}")
-    df_history['balance'] = df_history['balance'].apply(lambda x: f"${x:,.2f}")
-    df_history.columns = ['วัน/เวลาที่ออกออเดอร์', 'ฝั่งเทรด', 'ผลลัพธ์', 'กำไร/ขาดทุนสุทธิ', 'เงินคงเหลือ']
-    st.dataframe(df_history, use_container_width=True)
+    df_show = df_history.copy()
+    df_show['entry_date'] = df_show['entry_date'].dt.strftime('%d/%m/%Y %H:%M')
+    df_show['exit_date'] = df_show['exit_date'].dt.strftime('%d/%m/%Y %H:%M')
+    df_show['pnl'] = df_show['pnl'].apply(lambda x: f"{'+' if x>0 else ''}${x:,.2f}")
+    df_show['balance'] = df_show['balance'].apply(lambda x: f"${x:,.2f}")
+    df_show = df_show[['entry_date', 'exit_date', 'type', 'result', 'pnl', 'balance']]
+    df_show.columns = ['วัน/เวลาเข้า', 'วัน/เวลาออก', 'ฝั่งเทรด', 'ผลลัพธ์', 'กำไร/ขาดทุน', 'เงินคงเหลือ']
+    st.dataframe(df_show, use_container_width=True)
 else:
     st.warning("ไม่พบสัญญาณการเข้าเทรด กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
+
+# --- ฟีเจอร์ใหม่: กราฟส่องไม้เทรด (Trade Visualizer) ---
+if trades > 0:
+    st.divider()
+    st.subheader("🔎 เจาะลึกกราฟแต่ละไม้เทรด (Trade Visualizer)")
+    st.markdown("ระบบจะดึงกราฟแท่งเทียน **ช่วงก่อนและหลังเข้าออเดอร์** มาแสดงให้เห็นชัดๆ ว่าบอทกดซื้อตรงไหน และขายตรงไหน")
+    
+    # สร้างตัวเลือกให้ User กดเลือกไม้เทรด
+    trade_options = []
+    for i, t in enumerate(trade_history):
+        emoji = "🟢" if t['pnl'] > 0 else ("🔴" if t['pnl'] < 0 else "⚪")
+        trade_options.append(f"ไม้ที่ {i+1} : {emoji} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}")
+    
+    selected_trade_str = st.selectbox("🎯 เลือกไม้เทรดที่ต้องการดูกราฟ:", trade_options)
+    selected_idx = trade_options.index(selected_trade_str)
+    t_data = trade_history[selected_idx]
+    
+    # หาวันที่เข้าและออก เพื่อตัดกราฟมาโชว์เฉพาะช่วงนั้น (+/- 30 แท่ง เพื่อให้เห็นบริบทรอบๆ)
+    idx_start = df.index[df['timestamp'] == t_data['entry_date']].tolist()[0]
+    idx_end = df.index[df['timestamp'] == t_data['exit_date']].tolist()[0]
+    
+    plot_start = max(0, idx_start - 30)
+    plot_end = min(len(df) - 1, idx_end + 30)
+    df_plot = df.iloc[plot_start:plot_end+1]
+    
+    fig2 = go.Figure(data=[go.Candlestick(x=df_plot['timestamp'],
+                    open=df_plot['open'], high=df_plot['high'],
+                    low=df_plot['low'], close=df_plot['close'],
+                    name='Candles')])
+                    
+    # จุดเข้า (รูปดาว)
+    fig2.add_trace(go.Scatter(x=[t_data['entry_date']], y=[t_data['entry_price']],
+                              mode='markers', marker=dict(size=14, color='cyan', symbol='star'),
+                              name='🌟 จุดเข้า (Entry)'))
+    # จุดออก (รูปกากบาท)
+    fig2.add_trace(go.Scatter(x=[t_data['exit_date']], y=[t_data['exit_price']],
+                              mode='markers', marker=dict(size=14, color='magenta', symbol='x'),
+                              name='❌ จุดออก (Exit)'))
+                              
+    # เส้นประสีแดงบอก Stop Loss เริ่มต้น
+    fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['initial_sl'],
+                   x1=df_plot['timestamp'].iloc[-1], y1=t_data['initial_sl'],
+                   line=dict(color="red", width=2, dash="dash"))
+    fig2.add_annotation(x=df_plot['timestamp'].iloc[15], y=t_data['initial_sl'],
+                        text="เส้น Stop Loss", showarrow=False, yshift=15, font=dict(color="red"))
+                        
+    # เส้นสีฟ้าบอกราคาตอนเข้า
+    fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['entry_price'],
+                   x1=df_plot['timestamp'].iloc[-1], y1=t_data['entry_price'],
+                   line=dict(color="cyan", width=1, dash="dot"))
+                   
+    fig2.update_layout(height=500, template='plotly_dark', xaxis_rangeslider_visible=False,
+                       title=f"วิเคราะห์ไม้เทรดที่ {selected_idx+1} (สถานะ: {t_data['result']})")
+    st.plotly_chart(fig2, use_container_width=True)
