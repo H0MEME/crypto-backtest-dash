@@ -425,13 +425,12 @@ if trades > 0:
     
     st.markdown("💡 **Tip:** คุณสามารถ **คลิกเลือกแถวในตารางด้านล่างนี้** เพื่อเปลี่ยนกราฟวิเคราะห์ไม้เทรดด้านล่างได้ทันทีครับ")
     
-    # --- ระบบจัดการสถานะ (Session State) เพื่อซิงค์ตารางกับ Dropdown ---
-    if 'visualizer_idx' not in st.session_state:
-        st.session_state.visualizer_idx = 0
+    # --- อัปเดตระบบ Session State บังคับกล่องให้เปลี่ยนตามตาราง ---
+    if 'selectbox_idx' not in st.session_state:
+        st.session_state.selectbox_idx = 0
     if 'last_clicked_row' not in st.session_state:
         st.session_state.last_clicked_row = None
 
-    # วาดตารางแบบโต้ตอบได้ (Interactive)
     selection_event = st.dataframe(
         df_show, 
         use_container_width=True,
@@ -439,12 +438,11 @@ if trades > 0:
         selection_mode="single-row"
     )
     
-    # ตรวจสอบการคลิกจากตาราง
     if selection_event.selection.rows:
         clicked_row = selection_event.selection.rows[0]
-        # อัปเดตเฉพาะเมื่อมีการคลิกแถวใหม่เท่านั้น เพื่อไม่ให้ไปล็อค Dropdown
+        # สั่งยัดค่าใส่ Key ของ Selectbox โดยตรง!
         if st.session_state.last_clicked_row != clicked_row:
-            st.session_state.visualizer_idx = clicked_row
+            st.session_state.selectbox_idx = clicked_row
             st.session_state.last_clicked_row = clicked_row
     else:
         st.session_state.last_clicked_row = None
@@ -461,25 +459,18 @@ if trades > 0:
         emoji = "🟢" if t['pnl'] > 0 else ("🔴" if t['pnl'] < 0 else "⚪")
         trade_options.append(f"ไม้ที่ {i+1} : {emoji} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}")
     
-    # ถ้ามีการเปลี่ยนกลยุทธ์แล้วจำนวนไม้น้อยลง ป้องกัน Error ทะลุ Index
-    if st.session_state.visualizer_idx >= trades:
-        st.session_state.visualizer_idx = 0
-        
-    def update_visualizer_idx():
-        st.session_state.visualizer_idx = st.session_state.selectbox_idx
+    if st.session_state.selectbox_idx >= trades:
+        st.session_state.selectbox_idx = 0
         
     selected_idx = st.selectbox(
         "🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ (ตัวเลือกนี้ซิงค์กับตารางด้านบน):", 
         range(trades),
         format_func=lambda i: trade_options[i],
-        index=st.session_state.visualizer_idx,
-        key="selectbox_idx",
-        on_change=update_visualizer_idx
+        key="selectbox_idx" # << ผูกกล่องเข้ากับ Session State ตัวนี้ 100%
     )
     
     t_data = trade_history[selected_idx]
     
-    # หาวันที่เข้าและออก เพื่อตัดกราฟมาโชว์เฉพาะช่วงนั้น (+/- 30 แท่ง)
     idx_start = df.index[df['timestamp'] == t_data['entry_date']].tolist()[0]
     idx_end = df.index[df['timestamp'] == t_data['exit_date']].tolist()[0]
     
@@ -492,23 +483,19 @@ if trades > 0:
                     low=df_plot['low'], close=df_plot['close'],
                     name='Candles')])
                     
-    # จุดเข้า (รูปดาว)
     fig2.add_trace(go.Scatter(x=[t_data['entry_date']], y=[t_data['entry_price']],
                               mode='markers', marker=dict(size=14, color='cyan', symbol='star'),
                               name='🌟 จุดเข้า (Entry)'))
-    # จุดออก (รูปกากบาท)
     fig2.add_trace(go.Scatter(x=[t_data['exit_date']], y=[t_data['exit_price']],
                               mode='markers', marker=dict(size=14, color='magenta', symbol='x'),
                               name='❌ จุดออก (Exit)'))
                               
-    # เส้นประสีแดงบอก Stop Loss เริ่มต้น
     fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['initial_sl'],
                    x1=df_plot['timestamp'].iloc[-1], y1=t_data['initial_sl'],
                    line=dict(color="red", width=2, dash="dash"))
     fig2.add_annotation(x=df_plot['timestamp'].iloc[15], y=t_data['initial_sl'],
                         text="เส้น Stop Loss", showarrow=False, yshift=15, font=dict(color="red"))
                         
-    # เส้นสีฟ้าบอกราคาตอนเข้า
     fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['entry_price'],
                    x1=df_plot['timestamp'].iloc[-1], y1=t_data['entry_price'],
                    line=dict(color="cyan", width=1, dash="dot"))
