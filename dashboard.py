@@ -6,11 +6,9 @@ import ccxt
 import time
 from datetime import datetime, timedelta
 
-# 1. ตั้งค่าหน้าเพจ Dashboard
 st.set_page_config(page_title="Crypto Strategy Backtester", layout="wide")
-st.title("📊 ศูนย์รวมระบบทดสอบกลยุทธ์เทรด (Advanced Trade Management)")
+st.title("📊 ศูนย์รวมระบบทดสอบกลยุทธ์เทรด (Cloud Optimized)")
 
-# --- ฐานข้อมูลกลยุทธ์และแหล่งที่มา ---
 strategy_info = {
     "Ichimoku Breakout (Trend 4H)": {
         "desc": "ระบบกินคำใหญ่ (RR 1:3) ทะลุเมฆ Ichimoku กรองเทรนด์ด้วย EMA200 และความแรงเทรนด์ด้วย ADX > 25",
@@ -44,16 +42,25 @@ strategy_info = {
     }
 }
 
-# --- ฟังก์ชันดึงรายชื่อเหรียญ ---
+# --- แก้ปัญหา Cloud โดนบล็อก: เปลี่ยนมาดึงข้อมูลจาก Bybit แทน Binance ---
 @st.cache_data(ttl=86400)
-def get_binance_usdt_pairs():
-    exchange = ccxt.binance()
-    markets = exchange.load_markets()
-    return sorted([symbol for symbol, market in markets.items() if symbol.endswith('/USDT') and market.get('active', True)])
+def get_crypto_usdt_pairs():
+    # ใช้ Bybit เพื่อเลี่ยงการบล็อก IP สหรัฐอเมริกาของ Streamlit Cloud
+    exchange = ccxt.bybit({'enableRateLimit': True}) 
+    retries = 3
+    for attempt in range(retries):
+        try:
+            markets = exchange.load_markets()
+            # คัดกรองเอาเฉพาะคู่เทรด Spot ปกติที่ลงท้ายด้วย /USDT
+            return sorted([symbol for symbol, market in markets.items() if symbol.endswith('/USDT') and market.get('spot', False) and market.get('active', True)])
+        except Exception as e:
+            if attempt == retries - 1:
+                st.error(f"ไม่สามารถโหลดรายชื่อเหรียญได้: {e}")
+                return ['BTC/USDT', 'ETH/USDT']
+            time.sleep(2)
 
-usdt_pairs = get_binance_usdt_pairs()
+usdt_pairs = get_crypto_usdt_pairs()
 
-# 2. แถบตั้งค่าด้านข้าง (Sidebar)
 st.sidebar.header("⚙️ ตั้งค่าระบบเทรด")
 strategy_choice = st.sidebar.selectbox("🎯 เลือกกลยุทธ์เทรด", list(strategy_info.keys()))
 
@@ -61,19 +68,18 @@ st.sidebar.markdown("---")
 default_index = usdt_pairs.index('BTC/USDT') if 'BTC/USDT' in usdt_pairs else 0
 symbol = st.sidebar.selectbox("🔍 ค้นหาคู่เหรียญ (พิมพ์ชื่อได้เลย)", usdt_pairs, index=default_index)
 
-# แนะนำ Timeframe ให้อัตโนมัติตามกลยุทธ์
 if "Ichimoku" in strategy_choice:
-    default_tf, default_yr = 2, 2 # แนะนำ 4h, 2 ปี
+    default_tf, default_yr = 2, 2
 elif "SMC" in strategy_choice:
-    default_tf, default_yr = 0, 0 # 15m, 6 เดือน
+    default_tf, default_yr = 0, 0
 elif strategy_choice == "ATR Fibonacci Pocket (Pullback)":
-    default_tf, default_yr = 1, 1 # 1h, 1 ปี
+    default_tf, default_yr = 1, 1
 else:
-    default_tf, default_yr = 1, 2 # 1h, 2 ปี
+    default_tf, default_yr = 1, 2
 
 timeframe = st.sidebar.selectbox("Timeframe", ["15m", "1h", "4h", "1d"], index=default_tf)
-years_back = st.sidebar.selectbox("ระยะเวลาย้อนหลัง", ["6 เดือน", "1 ปี", "2 ปี", "3 ปี", "4 ปี"], index=default_yr)
-days_back = {"6 เดือน": 180, "1 ปี": 365, "2 ปี": 730, "3 ปี": 1095, "4 ปี": 1460}[years_back]
+years_back = st.sidebar.selectbox("ระยะเวลาย้อนหลัง", ["6 เดือน", "1 ปี", "2 ปี", "3 ปี"], index=default_yr)
+days_back = {"6 เดือน": 180, "1 ปี": 365, "2 ปี": 730, "3 ปี": 1095}[years_back]
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("💰 การจัดการเงิน (Money Management)")
@@ -95,24 +101,39 @@ else:
 st.info(f"💡 **หลักการทำงาน:** {strategy_info[strategy_choice]['desc']}\n\n"
         f"🔗 **แหล่งอ้างอิงคลิป/บทความ:** [{strategy_info[strategy_choice]['source']}]({strategy_info[strategy_choice]['link']})")
 
-# 4. ฟังก์ชันดึงข้อมูลย้อนหลัง
+# --- ดึงกราฟจาก Bybit แบบปลอดภัย ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_historical_data(sym, tf, days):
-    exchange = ccxt.binance()
+    exchange = ccxt.bybit({'enableRateLimit': True}) # เปลี่ยนมาใช้ Bybit
     start_time = datetime.now() - timedelta(days=days)
     since = int(start_time.timestamp() * 1000)
     all_bars = []
     
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
     while True:
         try:
+            # Bybit ดึงกราฟได้ทีละ 1000 แท่งเหมือนกันเป๊ะ
             bars = exchange.fetch_ohlcv(sym, timeframe=tf, since=since, limit=1000)
             if not bars: break
             all_bars.extend(bars)
             since = bars[-1][0] + 1 
+            
+            current_date = datetime.fromtimestamp(since/1000)
+            percent_done = min(100, int((len(all_bars) / (days * 24 * (60/int(tf.replace('m','').replace('h','60').replace('d','1440'))))) * 100))
+            progress_bar.progress(percent_done / 100.0)
+            status_text.text(f"⏳ กำลังโหลดข้อมูล {sym}... ได้มาแล้ว {len(all_bars)} แท่ง (ถึงวันที่ {current_date.strftime('%Y-%m-%d')})")
+            
             if len(bars) < 1000: break
-            time.sleep(0.1)
-        except Exception:
-            break
+            time.sleep(0.5) 
+            
+        except Exception as e:
+            status_text.text(f"⚠️ API จำกัดการเชื่อมต่อชั่วคราว รอ 3 วินาที...")
+            time.sleep(3)
+            
+    progress_bar.empty()
+    status_text.empty()
             
     if not all_bars: return pd.DataFrame()
     df = pd.DataFrame(all_bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -120,14 +141,13 @@ def load_historical_data(sym, tf, days):
     df = df.drop_duplicates(subset=['timestamp']).reset_index(drop=True)
     return df
 
-with st.spinner(f'⏳ กำลังโหลดข้อมูล {symbol}...'):
-    df = load_historical_data(symbol, timeframe, days_back)
+df = load_historical_data(symbol, timeframe, days_back)
 
 if df.empty:
     st.error("ไม่พบข้อมูล กรุณาลองเปลี่ยนเหรียญหรือลดเวลาลง")
     st.stop()
 
-# 5. คำนวณ Indicator (ครอบคลุมทุกระบบ)
+# คำนวณ Indicator 
 df['tr0'] = abs(df['high'] - df['low'])
 df['tr1'] = abs(df['high'] - df['close'].shift())
 df['tr2'] = abs(df['low'] - df['close'].shift())
@@ -135,16 +155,11 @@ df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
 df['atr_14'] = df['tr'].ewm(alpha=1/14, adjust=False).mean()
 
 if strategy_choice == "Ichimoku Breakout (Trend 4H)":
-    # คำนวณ Ichimoku Cloud (9, 26, 52)
     df['tenkan'] = (df['high'].rolling(window=9).max() + df['low'].rolling(window=9).min()) / 2
     df['kijun'] = (df['high'].rolling(window=26).max() + df['low'].rolling(window=26).min()) / 2
     df['senkou_a'] = ((df['tenkan'] + df['kijun']) / 2).shift(26)
     df['senkou_b'] = ((df['high'].rolling(window=52).max() + df['low'].rolling(window=52).min()) / 2).shift(26)
-    
-    # คำนวณ EMA 200
     df['ema_200'] = df['close'].ewm(span=200, adjust=False).mean()
-    
-    # คำนวณ ADX (14)
     df['up_move'] = df['high'].diff()
     df['down_move'] = df['low'].shift(1) - df['low']
     df['+dm'] = np.where((df['up_move'] > df['down_move']) & (df['up_move'] > 0), df['up_move'], 0.0)
@@ -182,7 +197,7 @@ elif strategy_choice == "EMA Crossover (Classic)":
 
 df = df.dropna().reset_index(drop=True)
 
-# 6. ลอจิก Backtest 
+# ลอจิก Backtest 
 capital = initial_capital
 in_position = False
 position_type = None
@@ -272,22 +287,16 @@ for i in range(10, len(df)):
         elif order_timeout <= 0 or row['close'] < sl_price:
             pending_order = False
 
-    # --- การหาจุดเข้า (Entry Logic) ---
+    # การหาจุดเข้า 
     if not in_position and not pending_order:
-        
-        # ระบบใหม่ที่ 6: Ichimoku Breakout
         if strategy_choice == "Ichimoku Breakout (Trend 4H)":
             is_adx_strong = row['adx'] > 25
-            
-            # Setup Long: ทะลุเมฆบน + น้ำเงินตัดแดงขึ้น + ยืนเหนือ EMA200 + เทรนด์ ADX แข็ง
             cloud_top = max(row['senkou_a'], row['senkou_b'])
             if row['close'] > cloud_top and row['tenkan'] > row['kijun'] and row['close'] > row['ema_200'] and is_adx_strong:
                 entry_price, sl_price = row['close'], row['close'] - (row['atr_14'] * 2)
                 risk_amount = capital * (risk_per_trade / 100)
                 position_size = risk_amount / (entry_price - sl_price)
                 in_position, position_type, just_entered = True, 'LONG', True
-                
-            # Setup Short: ทะลุเมฆล่าง + น้ำเงินตัดแดงลง + อยู่ใต้ EMA200 + เทรนด์ ADX แข็ง
             cloud_bottom = min(row['senkou_a'], row['senkou_b'])
             if row['close'] < cloud_bottom and row['tenkan'] < row['kijun'] and row['close'] < row['ema_200'] and is_adx_strong:
                 entry_price, sl_price = row['close'], row['close'] + (row['atr_14'] * 2)
@@ -327,7 +336,6 @@ for i in range(10, len(df)):
                         in_position, position_type, just_entered = True, 'LONG', True
                     pullback_long = False
                 elif row['close'] < pocket_bottom: pullback_long = False
-                    
             elif trend == -1:
                 pocket_bottom = row['wma_100'] + (row['atr_100'] * 3 * 0.5)
                 pocket_top = row['wma_100'] + (row['atr_100'] * 3 * 0.786)
@@ -376,7 +384,6 @@ for i in range(10, len(df)):
         remaining_size = position_size
         trade_pnl = 0.0
         is_partial, is_breakeven = False, False
-        
         if enable_advanced_tm:
             be_trigger_price = entry_price + (risk_distance * be_rr) if position_type == 'LONG' else entry_price - (risk_distance * be_rr)
             partial_tp_price = entry_price + (risk_distance * partial_rr) if position_type == 'LONG' else entry_price - (risk_distance * partial_rr)
@@ -386,7 +393,6 @@ for i in range(10, len(df)):
             partial_tp_price = final_tp_price
             be_trigger_price = float('inf') if position_type == 'LONG' else 0
 
-# 7. สรุปผลลัพธ์
 trades = len(trade_history)
 wins = sum(1 for t in trade_history if t['pnl'] > 0)
 losses = sum(1 for t in trade_history if t['pnl'] < 0)
@@ -400,17 +406,12 @@ col3.metric("อัตราชนะ (Win Rate)", f"{win_rate:.0f}%")
 
 st.divider()
 
-# 8. วาดกราฟการเติบโตของพอร์ต
 st.subheader("📈 กราฟการเติบโตของพอร์ต (Equity Curve)")
 fig = go.Figure()
-fig.add_trace(go.Scatter(
-    y=equity_curve, mode='lines', name='Capital ($)',
-    line=dict(color='#00ff88', width=2), fill='tozeroy', fillcolor='rgba(0, 255, 136, 0.1)'
-))
+fig.add_trace(go.Scatter(y=equity_curve, mode='lines', name='Capital ($)', line=dict(color='#00ff88', width=2), fill='tozeroy', fillcolor='rgba(0, 255, 136, 0.1)'))
 fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0), xaxis_title="จำนวนออเดอร์ที่ปิด (Trades)", yaxis_title="ยอดเงินในพอร์ต ($)", template="plotly_dark")
 st.plotly_chart(fig, use_container_width=True)
 
-# 9. ตารางแสดงประวัติการเทรด
 st.subheader("📋 ประวัติการเข้าเทรด")
 if trades > 0:
     df_history = pd.DataFrame(trade_history)
@@ -421,4 +422,3 @@ if trades > 0:
     st.dataframe(df_history, use_container_width=True)
 else:
     st.warning("ไม่พบสัญญาณการเข้าเทรด กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
-    
