@@ -39,7 +39,7 @@ strategy_info = {
 }
 
 # ==========================================
-# โหมดที่ 1: BACKTESTER
+# โหมดที่ 1: BACKTESTER (พร้อมกราฟแท่งเทียน)
 # ==========================================
 if app_mode == "📊 ระบบทดสอบ (Backtester)":
     st.title("📊 ระบบทดสอบกลยุทธ์เทรด (Interactive Table)")
@@ -59,12 +59,12 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     days_back = {"6 เดือน": 180, "1 ปี": 365, "2 ปี": 730, "3 ปี": 1095}[years_back]
 
     st.sidebar.markdown("---")
-    st.sidebar.subheader("💰 การจัดการเงิน (Money Management)")
+    st.sidebar.subheader("💰 การจัดการเงิน")
     initial_capital = st.sidebar.number_input("ทุนเริ่มต้น ($)", min_value=10.0, value=5000.0, step=100.0)
     risk_per_trade = st.sidebar.slider("ความเสี่ยงเมื่อขาดทุน (%)", 1.0, 10.0, 3.0, step=0.5)
 
     st.sidebar.markdown("---")
-    st.sidebar.subheader("🛡️ การจัดการออเดอร์ (Trade Management)")
+    st.sidebar.subheader("🛡️ การจัดการออเดอร์")
     enable_advanced_tm = st.sidebar.checkbox("เปิดใช้ระบบแบ่งปิดกำไร และเลื่อน SL บังทุน", value=False)
     if enable_advanced_tm:
         be_rr = st.sidebar.slider("จุดเลื่อน Stop Loss บังหน้าทุน (RR)", 0.5, 3.0, 1.0, 0.1)
@@ -105,12 +105,11 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
         return df
 
     df = load_historical_data(symbol, timeframe, days_back)
-
     if df.empty:
         st.error("ไม่พบข้อมูล กรุณาลองเปลี่ยนเหรียญหรือลดเวลาลง")
         st.stop()
 
-    # (การคำนวณ Indicator ของ Backtest เก็บไว้เหมือนเดิม...)
+    # --- Indicator Calculations ---
     df['tr0'] = abs(df['high'] - df['low'])
     df['tr1'] = abs(df['high'] - df['close'].shift())
     df['tr2'] = abs(df['low'] - df['close'].shift())
@@ -335,6 +334,98 @@ if app_mode == "📊 ระบบทดสอบ (Backtester)":
     fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0), xaxis_title="จำนวนออเดอร์ที่ปิด (Trades)", yaxis_title="ยอดเงินในพอร์ต ($)", template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
 
+    # ----------------------------------------------------
+    # ส่วนประวัติการเทรดและ Trade Visualizer (ที่เผลอตัดออกไป)
+    # ----------------------------------------------------
+    st.subheader("📋 ประวัติการเข้าเทรด")
+    if trades > 0:
+        df_history = pd.DataFrame(trade_history)
+        df_show = df_history.copy()
+        df_show['entry_date'] = df_show['entry_date'].dt.strftime('%d/%m/%Y %H:%M')
+        df_show['exit_date'] = df_show['exit_date'].dt.strftime('%d/%m/%Y %H:%M')
+        df_show['pnl'] = df_show['pnl'].apply(lambda x: f"{'+' if x>0 else ''}${x:,.2f}")
+        df_show['balance'] = df_show['balance'].apply(lambda x: f"${x:,.2f}")
+        df_show = df_show[['entry_date', 'exit_date', 'type', 'result', 'pnl', 'balance']]
+        df_show.columns = ['วัน/เวลาเข้า', 'วัน/เวลาออก', 'ฝั่งเทรด', 'ผลลัพธ์', 'กำไร/ขาดทุน', 'เงินคงเหลือ']
+        
+        st.markdown("💡 **Tip:** คุณสามารถ **คลิกเลือกแถวในตารางด้านล่างนี้** เพื่อเปลี่ยนกราฟวิเคราะห์ไม้เทรดด้านล่างได้ทันทีครับ")
+        
+        if 'selectbox_idx' not in st.session_state:
+            st.session_state.selectbox_idx = 0
+        if 'last_clicked_row' not in st.session_state:
+            st.session_state.last_clicked_row = None
+
+        selection_event = st.dataframe(
+            df_show, 
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="single-row"
+        )
+        
+        if selection_event.selection.rows:
+            clicked_row = selection_event.selection.rows[0]
+            if st.session_state.last_clicked_row != clicked_row:
+                st.session_state.selectbox_idx = clicked_row
+                st.session_state.last_clicked_row = clicked_row
+        else:
+            st.session_state.last_clicked_row = None
+            
+        st.divider()
+        st.subheader("🔎 เจาะลึกกราฟแต่ละไม้เทรด (Trade Visualizer)")
+        
+        trade_options = []
+        for i, t in enumerate(trade_history):
+            emoji = "🟢" if t['pnl'] > 0 else ("🔴" if t['pnl'] < 0 else "⚪")
+            trade_options.append(f"ไม้ที่ {i+1} : {emoji} {t['type']} | PnL: ${t['pnl']:.2f} | วันที่เข้า: {t['entry_date'].strftime('%d %b %Y')}")
+        
+        if st.session_state.selectbox_idx >= trades:
+            st.session_state.selectbox_idx = 0
+            
+        selected_idx = st.selectbox(
+            "🎯 เลื่อนเพื่อดูไม้เทรดที่ต้องการ (ตัวเลือกนี้ซิงค์กับตารางด้านบน):", 
+            range(trades),
+            format_func=lambda i: trade_options[i],
+            key="selectbox_idx" 
+        )
+        
+        t_data = trade_history[selected_idx]
+        
+        idx_start = df.index[df['timestamp'] == t_data['entry_date']].tolist()[0]
+        idx_end = df.index[df['timestamp'] == t_data['exit_date']].tolist()[0]
+        
+        plot_start = max(0, idx_start - 30)
+        plot_end = min(len(df) - 1, idx_end + 30)
+        df_plot = df.iloc[plot_start:plot_end+1]
+        
+        fig2 = go.Figure(data=[go.Candlestick(x=df_plot['timestamp'],
+                        open=df_plot['open'], high=df_plot['high'],
+                        low=df_plot['low'], close=df_plot['close'],
+                        name='Candles')])
+                        
+        fig2.add_trace(go.Scatter(x=[t_data['entry_date']], y=[t_data['entry_price']],
+                                  mode='markers', marker=dict(size=14, color='cyan', symbol='star'),
+                                  name='🌟 จุดเข้า (Entry)'))
+        fig2.add_trace(go.Scatter(x=[t_data['exit_date']], y=[t_data['exit_price']],
+                                  mode='markers', marker=dict(size=14, color='magenta', symbol='x'),
+                                  name='❌ จุดออก (Exit)'))
+                                  
+        fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['initial_sl'],
+                       x1=df_plot['timestamp'].iloc[-1], y1=t_data['initial_sl'],
+                       line=dict(color="red", width=2, dash="dash"))
+        fig2.add_annotation(x=df_plot['timestamp'].iloc[15], y=t_data['initial_sl'],
+                            text="เส้น Stop Loss", showarrow=False, yshift=15, font=dict(color="red"))
+                            
+        fig2.add_shape(type="line", x0=df_plot['timestamp'].iloc[0], y0=t_data['entry_price'],
+                       x1=df_plot['timestamp'].iloc[-1], y1=t_data['entry_price'],
+                       line=dict(color="cyan", width=1, dash="dot"))
+                       
+        fig2.update_layout(height=500, template='plotly_dark', xaxis_rangeslider_visible=False,
+                           title=f"วิเคราะห์ไม้เทรดที่ {selected_idx+1} (สถานะ: {t_data['result']})")
+        st.plotly_chart(fig2, use_container_width=True)
+
+    else:
+        st.warning("ไม่พบสัญญาณการเข้าเทรด หรือข้อมูลเหรียญในอดีตมีไม่เพียงพอ กรุณาปรับเงื่อนไขให้ผ่อนคลายขึ้น")
+
 
 # ==========================================
 # โหมดที่ 2: ALL-MARKET SCREENER (NEW - อัปเกรดแยกตามกลยุทธ์)
@@ -385,38 +476,33 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
             
             for i, sym in enumerate(filtered_symbols):
                 try:
-                    # ดึงข้อมูลมาแค่ 200 แท่งก็พอสำหรับคำนวณ (เพื่อความรวดเร็ว)
                     ohlcv = exchange.fetch_ohlcv(sym, timeframe=tf_screen, limit=250)
                     if len(ohlcv) < 200: continue
                     
                     df_scan = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                     
-                    # คำนวณ RSI เผื่อไว้ใช้
                     delta = df_scan['close'].diff()
                     gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
                     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                     rs = gain / (loss + 1e-10)
                     df_scan['rsi_14'] = 100 - (100 / (1 + rs))
                     
-                    # คำนวณ ATR
                     df_scan['tr0'] = abs(df_scan['high'] - df_scan['low'])
                     df_scan['tr1'] = abs(df_scan['high'] - df_scan['close'].shift())
                     df_scan['tr2'] = abs(df_scan['low'] - df_scan['close'].shift())
                     df_scan['tr'] = df_scan[['tr0', 'tr1', 'tr2']].max(axis=1)
                     df_scan['atr_14'] = df_scan['tr'].ewm(alpha=1/14, adjust=False).mean()
 
-                    latest = df_scan.iloc[-1] # แท่งปัจจุบันล่าสุด
-                    prev = df_scan.iloc[-2]   # แท่งที่แล้ว
+                    latest = df_scan.iloc[-1] 
+                    prev = df_scan.iloc[-2]   
                     signal = None
                     
-                    # --- การเช็คสัญญาณตามแต่ละกลยุทธ์ ---
                     if selected_strategy == "Ichimoku Breakout (Trend 4H)":
                         df_scan['tenkan'] = (df_scan['high'].rolling(window=9).max() + df_scan['low'].rolling(window=9).min()) / 2
                         df_scan['kijun'] = (df_scan['high'].rolling(window=26).max() + df_scan['low'].rolling(window=26).min()) / 2
                         df_scan['senkou_a'] = ((df_scan['tenkan'] + df_scan['kijun']) / 2).shift(26)
                         df_scan['senkou_b'] = ((df_scan['high'].rolling(window=52).max() + df_scan['low'].rolling(window=52).min()) / 2).shift(26)
                         df_scan['ema_200'] = df_scan['close'].ewm(span=200, adjust=False).mean()
-                        # ADX Calculation
                         df_scan['up_move'] = df_scan['high'].diff()
                         df_scan['down_move'] = df_scan['low'].shift(1) - df_scan['low']
                         df_scan['+dm'] = np.where((df_scan['up_move'] > df_scan['down_move']) & (df_scan['up_move'] > 0), df_scan['up_move'], 0.0)
@@ -454,8 +540,6 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                         elif df_scan['ema_12'].iloc[-2] >= df_scan['ema_26'].iloc[-2] and df_scan['ema_12'].iloc[-1] < df_scan['ema_26'].iloc[-1]:
                             signal = 'SHORT 🔴'
                             
-                    # SMC และ ATR Fibo เป็นระบบที่ต้องรอการคอนเฟิร์มหลายสวิง 
-                    # ใน Screener เบื้องต้นเราจะให้มันหา "Cross" ง่ายๆ ที่สอดคล้องกับระบบก่อน
                     elif selected_strategy == "ATR Fibonacci Pocket (Pullback)":
                         weights = np.arange(1, 101)
                         wma_100 = np.convolve(df_scan['close'].values, weights / weights.sum(), mode='valid')
@@ -464,15 +548,13 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                         if curr['close'] > curr['wma_100'] and curr['low'] < (curr['wma_100'] - (curr['atr_14'] * 1.5)) and curr['close'] > curr['open']:
                             signal = 'PULLBACK LONG 🟢'
 
-                    # --- กรองด้วย RSI ตามที่ตั้งค่า ---
                     rsi_val = latest['rsi_14']
                     if signal and use_rsi_filter:
                         if 'LONG' in signal and rsi_val >= 70:
-                            signal = None # ยกเลิกสัญญาณ เพราะ Overbought ไล่ราคาไปแล้ว
+                            signal = None 
                         elif 'SHORT' in signal and rsi_val <= 30:
-                            signal = None # ยกเลิกสัญญาณ เพราะ Oversold ขายถูกเกินไป
+                            signal = None 
 
-                    # ถ้ามีสัญญาณ บันทึกผล!
                     if signal:
                         results.append({
                             'เหรียญ (Symbol)': sym,
@@ -486,7 +568,7 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                     pass
                     
                 progress_bar.progress((i + 1) / len(filtered_symbols))
-                time.sleep(0.1) # ป้องกันโดนแบน
+                time.sleep(0.1) 
 
             progress_bar.empty()
             status_text.empty()
@@ -499,7 +581,7 @@ elif app_mode == "🚀 เรดาร์หาเหรียญ (All-Market Sc
                 st.warning(f"😅 ขณะนี้ตลาดนิ่ง ไม่มีเหรียญไหนเกิดสัญญาณ {selected_strategy} เลยครับ (ระบบบอทที่ดีคือการ 'นั่งทับมือ' ในเวลาที่ไม่มีสัญญาณครับ)")
 
 
-    # --- รูปแบบที่ 2: สแกนภาพรวมตลาด (Market Overview) แบบเดิม ---
+    # --- รูปแบบที่ 2: สแกนภาพรวมตลาด (Market Overview) ---
     elif screen_mode == "2. สแกนภาพรวมตลาด (Market Overview)":
         st.sidebar.header("🎯 ฟิลเตอร์กรองภาพรวม (Filters)")
         min_vol_usdt = st.sidebar.number_input("วอลุ่มเทรดขั้นต่ำ (USDT)", min_value=0.0, value=1000000.0, step=500000.0)
